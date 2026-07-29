@@ -171,9 +171,9 @@ Accounts are stored as JSON at the OS-specific app data directory:
 
 | OS | Path |
 |----|------|
-| macOS | `~/Library/Application Support/com.veepatil.authenticator/accounts.json` |
-| Linux | `~/.local/share/com.veepatil.authenticator/accounts.json` |
-| Windows | `%APPDATA%\com.veepatil.authenticator\accounts.json` |
+| macOS | `~/Library/Application Support/<your-app-identifier>/accounts.json` |
+| Linux | `~/.local/share/<your-app-identifier>/accounts.json` |
+| Windows | `%APPDATA%\<your-app-identifier>\accounts.json` |
 
 ---
 
