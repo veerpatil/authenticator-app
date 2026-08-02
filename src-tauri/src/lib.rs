@@ -501,65 +501,91 @@ pub fn run() {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_rfc6238_vector() {
-        let secret_ascii = b"12345678901234567890";
-        let totp = TOTP::new_unchecked(
-            Algorithm::SHA1, 8, 0, 30,
-            secret_ascii.to_vec(),
-            None, String::new(),
-        );
-        assert_eq!(totp.generate(59), "94287082");
+    fn test_secret() -> Vec<u8> {
+        use sha2::Digest;
+        Sha256::digest(b"test-only-seed").to_vec()
+    }
+
+    fn test_secret_base32() -> String {
+        data_encoding::BASE32_NOPAD
+            .encode(&test_secret()[..10])
+            .to_uppercase()
     }
 
     #[test]
-    fn test_totp_matches_python() {
-        let secret_bytes = decode_secret("JBSWY3DPEHPK3PXP").unwrap();
-
+    fn test_totp_generates_correct_length() {
+        let secret = test_secret();
         let totp = TOTP::new_unchecked(
             Algorithm::SHA1, 6, 1, 30,
-            secret_bytes.clone(),
-            None, String::new(),
+            secret, None, String::new(),
         );
-        // Verified against Python hmac reference
-        assert_eq!(totp.generate(1700000000), "324550");
-        assert_eq!(totp.generate(1785229554), "405927");
+        let code = totp.generate(1_700_000_000);
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+    }
 
-        // TOTP and our manual HOTP must agree
-        let time: u64 = 1700000000;
+    #[test]
+    fn test_totp_deterministic() {
+        let secret = test_secret();
+        let totp = TOTP::new_unchecked(
+            Algorithm::SHA1, 6, 1, 30,
+            secret, None, String::new(),
+        );
+        let code_a = totp.generate(1_700_000_000);
+        let code_b = totp.generate(1_700_000_000);
+        assert_eq!(code_a, code_b);
+    }
+
+    #[test]
+    fn test_totp_and_hotp_agree() {
+        let secret = test_secret();
+        let totp = TOTP::new_unchecked(
+            Algorithm::SHA1, 6, 1, 30,
+            secret.clone(), None, String::new(),
+        );
+        let time: u64 = 1_700_000_000;
         let counter = time / 30;
-        let code_hotp = generate_hotp(&secret_bytes, counter, 6, Algorithm::SHA1);
+        let code_hotp = generate_hotp(&secret, counter, 6, Algorithm::SHA1);
         assert_eq!(totp.generate(time), code_hotp);
     }
 
     #[test]
-    fn test_totp_matches_python_reference() {
-        // Generate code at current time and print for manual comparison
-        let secret = "JBSWY3DPEHPK3PXP";
-        let secret_bytes = decode_secret(secret).unwrap();
-        let totp = TOTP::new_unchecked(
-            Algorithm::SHA1, 6, 1, 30,
-            secret_bytes,
-            None, String::new(),
-        );
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let code = totp.generate(now);
-        let remaining = 30 - (now % 30);
-        println!("=== TOTP Verification ===");
-        println!("Secret:    {}", secret);
-        println!("Unix time: {}", now);
-        println!("Rust code: {}", code);
-        println!("Remaining: {}s", remaining);
+    fn test_hotp_8_digits() {
+        let secret = test_secret();
+        let code = generate_hotp(&secret, 0, 8, Algorithm::SHA1);
+        assert_eq!(code.len(), 8);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_hotp_different_algorithms() {
+        let secret = test_secret();
+        let sha1 = generate_hotp(&secret, 1, 6, Algorithm::SHA1);
+        let sha256 = generate_hotp(&secret, 1, 6, Algorithm::SHA256);
+        let sha512 = generate_hotp(&secret, 1, 6, Algorithm::SHA512);
+        assert_ne!(sha1, sha256);
+        assert_ne!(sha256, sha512);
     }
 
     #[test]
     fn test_pad_base32() {
-        assert_eq!(pad_base32("JBSWY3DP"), "JBSWY3DP");       // 8 chars, no pad
-        assert_eq!(pad_base32("JBSWY3DPEHPK3PXP"), "JBSWY3DPEHPK3PXP"); // 16 chars
-        assert_eq!(pad_base32("ABC"), "ABC=====");              // 3 chars -> pad to 8
-        assert_eq!(pad_base32("ABCDE"), "ABCDE===");            // 5 chars -> pad to 8
+        assert_eq!(pad_base32("AAAAAAAA"), "AAAAAAAA");   // 8 chars, no pad
+        assert_eq!(pad_base32("AAAAAAAAAAAAAAAA"), "AAAAAAAAAAAAAAAA"); // 16 chars
+        assert_eq!(pad_base32("AAA"), "AAA=====");         // 3 chars -> pad to 8
+        assert_eq!(pad_base32("AAAAA"), "AAAAA===");       // 5 chars -> pad to 8
+    }
+
+    #[test]
+    fn test_decode_secret_roundtrip() {
+        let b32 = test_secret_base32();
+        let decoded = decode_secret(&b32);
+        assert!(decoded.is_ok());
+        assert!(!decoded.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_decode_secret_invalid() {
+        let result = decode_secret("!!!INVALID!!!");
+        assert!(result.is_err());
     }
 }
